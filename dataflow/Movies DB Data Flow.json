@@ -1,0 +1,130 @@
+{
+	"name": "Movies DB Data Flow",
+	"properties": {
+		"type": "MappingDataFlow",
+		"typeProperties": {
+			"sources": [
+				{
+					"dataset": {
+						"referenceName": "MOviedDBDataset",
+						"type": "DatasetReference"
+					},
+					"name": "MoviesDB"
+				}
+			],
+			"sinks": [
+				{
+					"dataset": {
+						"referenceName": "AzureSynapseAnalyticsTable1",
+						"type": "DatasetReference"
+					},
+					"name": "SynapseRankingSQLtablepoolsink"
+				},
+				{
+					"linkedService": {
+						"referenceName": "MoviesDBfile",
+						"type": "LinkedServiceReference"
+					},
+					"name": "sink1"
+				}
+			],
+			"transformations": [
+				{
+					"name": "SelectTransformation"
+				},
+				{
+					"name": "FilterTransformation"
+				},
+				{
+					"name": "GenreColumnTransformation"
+				},
+				{
+					"name": "rankmoviebyRating"
+				},
+				{
+					"name": "AggregateRatings"
+				},
+				{
+					"name": "UpSertifTrue"
+				}
+			],
+			"scriptLines": [
+				"source(output(",
+				"          movie as string,",
+				"          title as string,",
+				"          genres as string,",
+				"          year as string,",
+				"          Rating as string,",
+				"          RottenTomato as string",
+				"     ),",
+				"     allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     ignoreNoFilesFound: false) ~> MoviesDB",
+				"MoviesDB select(mapColumn(",
+				"          movie,",
+				"          title,",
+				"          genres,",
+				"          year,",
+				"          RottenTomato",
+				"     ),",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true) ~> SelectTransformation",
+				"SelectTransformation filter(toInteger(year)>1950) ~> FilterTransformation",
+				"FilterTransformation derive(PrimaryGenre = iif(locate('|',genres)>1,left(genres,locate('|',genres)-1),genres)) ~> GenreColumnTransformation",
+				"GenreColumnTransformation window(over(PrimaryGenre,",
+				"          year),",
+				"     desc(RottenTomato, true),",
+				"     RatingsRank = rank()) ~> rankmoviebyRating",
+				"rankmoviebyRating aggregate(groupBy(PrimaryGenre,",
+				"          year),",
+				"     AverageRating = avg(toInteger(RottenTomato)),",
+				"          HighestRated = first(title),",
+				"          LowestRated = last(title),",
+				"          NumberOfMovies = count()) ~> AggregateRatings",
+				"AggregateRatings alterRow(upsertIf(true())) ~> UpSertifTrue",
+				"UpSertifTrue sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     deletable:false,",
+				"     insertable:false,",
+				"     updateable:false,",
+				"     upsertable:true,",
+				"     keys:['PrimaryGenre','year'],",
+				"     format: 'table',",
+				"     staged: true,",
+				"     allowCopyCommand: true,",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true,",
+				"     errorHandlingOption: 'stopOnFirstError',",
+				"     mapColumn(",
+				"          PrimaryGenre,",
+				"          year,",
+				"          AverageRating,",
+				"          HighestRated,",
+				"          LowestRated,",
+				"          NumberOfMovies",
+				"     ),",
+				"     preCommands: [],",
+				"     postCommands: []) ~> SynapseRankingSQLtablepoolsink",
+				"UpSertifTrue sink(allowSchemaDrift: true,",
+				"     validateSchema: false,",
+				"     format: 'delta',",
+				"     fileSystem: 'sampledatacontainer',",
+				"     folderPath: 'output/deltalake',",
+				"     mergeSchema: false,",
+				"     autoCompact: false,",
+				"     optimizedWrite: false,",
+				"     vacuum: 0,",
+				"     deletable:false,",
+				"     insertable:false,",
+				"     updateable:false,",
+				"     upsertable:true,",
+				"     keys:['PrimaryGenre','year'],",
+				"     umask: 0022,",
+				"     preCommands: [],",
+				"     postCommands: [],",
+				"     skipDuplicateMapInputs: true,",
+				"     skipDuplicateMapOutputs: true) ~> sink1"
+			]
+		}
+	}
+}
